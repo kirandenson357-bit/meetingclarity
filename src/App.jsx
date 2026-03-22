@@ -58,6 +58,16 @@ const CSS = `
   .fu2{animation:fadeUp .36s .08s cubic-bezier(.16,1,.3,1) both}
   .fu3{animation:fadeUp .36s .13s cubic-bezier(.16,1,.3,1) both}
   .chk{transition:all .18s cubic-bezier(.34,1.56,.64,1)}
+
+  /* ── Mobile sidebar overlay ── */
+  .sidebar-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:200;backdrop-filter:blur(4px)}
+  @media(max-width:768px){
+    .sidebar-overlay{display:block}
+    .mobile-aside{position:fixed!important;transform:translateX(-100%);transition:transform .3s cubic-bezier(.16,1,.3,1)!important}
+    .mobile-aside.open{transform:translateX(0)!important}
+    .mobile-hide{display:none!important}
+    .mobile-show{display:flex!important}
+  }
 `;
 
 function Icon({ name, size=16, color="currentColor" }) {
@@ -240,7 +250,7 @@ function Dashboard({ meetings, onNew, onView, onGoActions, T }) {
   const recent  = [...meetings].sort((a,b)=>b.createdAt-a.createdAt).slice(0,4);
   return (
     <div>
-      <div style={{ display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:14,marginBottom:28 }}>
+      <div style={{ display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:14,marginBottom:28,gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))" }}>
         {[{label:"Total Meetings",value:meetings.length,sub:"all time",color:T.ink,d:"0s"},{label:"Pending Actions",value:pending.length,sub:"need attention",color:pending.length>0?T.orange:T.green,d:".05s"},{label:"Completed",value:done.length,sub:"actions done",color:T.greenText,d:".1s"}].map(({label,value,sub,color,d})=>(
           <div key={label} style={{ background:T.surface,borderRadius:14,border:`1px solid ${T.border}`,boxShadow:T.shadow,padding:"22px 24px",animation:`fadeUp .36s ${d} cubic-bezier(.16,1,.3,1) both` }}>
             <div style={{ fontSize:12,fontWeight:500,color:T.ink3,marginBottom:10 }}>{label}</div>
@@ -249,7 +259,7 @@ function Dashboard({ meetings, onNew, onView, onGoActions, T }) {
           </div>
         ))}
       </div>
-      <div style={{ display:"grid",gridTemplateColumns:"1.1fr .9fr",gap:18 }}>
+      <div style={{ display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(280px,1fr))",gap:18 }}>
         <div className="fu2">
           <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14 }}>
             <span style={{ fontSize:15,fontWeight:600,color:T.ink,letterSpacing:-0.3 }}>Recent Meetings</span>
@@ -338,12 +348,20 @@ function NewMeeting({ onResult, T }) {
     setLoading(true); setError(null);
     try {
       const prompt = `Analyze these meeting notes. Respond ONLY with a raw JSON object, no markdown fences, no extra text.\n{"title":"max 6 words","summary":"2-3 sentence exec summary","decisions":["..."],"action_items":[{"task":"...","owner":"name or Team","due":"date or ASAP or TBD","done":false}],"follow_ups":["..."],"attendees":["First Last"]}\n\nNotes:\n${notes}`;
-      const res = await fetch("/api/chat",{
-        method:"POST", headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({ prompt })
-      });
+      const GEMINI_KEY = "AIzaSyAba1jkwxKcZR-86k8F56o6GpDzxMgxax4";
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_KEY}`,
+        {
+          method:"POST",
+          headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({
+            contents:[{parts:[{text:prompt}]}],
+            generationConfig:{temperature:0.2, maxOutputTokens:1200}
+          })
+        }
+      );
       const data = await res.json();
-      const raw = data?.text||"";
+      const raw = data?.candidates?.[0]?.content?.parts?.[0]?.text||"";
       const parsed = JSON.parse(raw.replace(/```json|```/g,"").trim());
       onResult({...parsed,rawNotes:notes});
     } catch(e){ setError("Analysis failed — please try again."); }
@@ -465,7 +483,7 @@ function MeetingResult({ meeting, onSave, saved, onActionToggle, team, T }) {
       </div>
 
       {/* Decisions + Follow-ups */}
-      <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:14,marginBottom:14 }}>
+      <div style={{ display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(240px,1fr))",gap:14,marginBottom:14 }}>
         <SectionCard label="Decisions Made"   dot={T.green}  items={meeting.decisions||[]}  icon="check" iconBg={T.greenLight}  iconColor={T.greenText}/>
         <SectionCard label="Follow-ups Needed" dot={T.orange} items={meeting.follow_ups||[]} icon="arrow" iconBg={T.orangeLight} iconColor={T.orangeText}/>
       </div>
@@ -979,6 +997,7 @@ export default function App() {
   const [resultSaved,setResultSaved] = useState(false);
   const [loaded,setLoaded]       = useState(false);
   const [showSearch,setShowSearch] = useState(false);
+  const [sidebarOpen,setSidebarOpen] = useState(false);
   const T = makeTheme(dark);
 
   useEffect(()=>{
@@ -1050,7 +1069,7 @@ export default function App() {
   const TITLES = {dashboard:"Good day.",new:"New Meeting",result:pending?.title||"Meeting",actions:"Action Items",history:"History",team:"My Team"};
   const SUBS   = {dashboard:"Here's your workspace overview.",new:"Paste notes or record your meeting.",result:"Review your AI-generated summary.",actions:"Track tasks across all meetings.",history:"All your past meeting summaries.",team:`${team.length} member${team.length!==1?"s":""} · pick who to notify each meeting`};
   const activeNav = view==="result"?"new":view;
-  const goNew = ()=>{setPending(null);setResultSaved(false);setView("new");};
+  const goNew = ()=>{setPending(null);setResultSaved(false);setView("new");setSidebarOpen(false);};
 
   return (
     <div style={{ display:"flex",minHeight:"100vh",background:T.bg,fontFamily:"'DM Sans',-apple-system,BlinkMacSystemFont,sans-serif",transition:"background .3s" }}>
@@ -1059,7 +1078,8 @@ export default function App() {
       {showSearch&&<SearchModal meetings={meetings} onClose={()=>setShowSearch(false)} onView={m=>{handleView(m);setShowSearch(false);}} T={T}/>}
 
       {/* Sidebar */}
-      <aside style={{ width:236,flexShrink:0,background:T.sidebar,backdropFilter:"blur(20px)",WebkitBackdropFilter:"blur(20px)",borderRight:`1px solid ${T.border}`,display:"flex",flexDirection:"column",padding:"0 10px 20px",position:"sticky",top:0,height:"100vh",transition:"background .3s,border-color .3s" }}>
+      {sidebarOpen && <div className="sidebar-overlay" onClick={()=>setSidebarOpen(false)}/>}
+      <aside className={`mobile-aside${sidebarOpen?" open":""}`} style={{ width:236,flexShrink:0,background:T.sidebar,backdropFilter:"blur(20px)",WebkitBackdropFilter:"blur(20px)",borderRight:`1px solid ${T.border}`,display:"flex",flexDirection:"column",padding:"0 10px 20px",position:"sticky",top:0,height:"100vh",transition:"background .3s,border-color .3s",zIndex:201 }}>
         {/* Logo */}
         <div style={{ padding:"20px 10px 18px",borderBottom:`1px solid ${T.border}`,marginBottom:14 }}>
           <div style={{ display:"flex",alignItems:"center",gap:10 }}>
@@ -1080,7 +1100,7 @@ export default function App() {
           {NAV.map(n=>{
             const active=activeNav===n.id;
             return (
-              <button key={n.id} onClick={()=>n.id==="new"?goNew():setView(n.id)}
+              <button key={n.id} onClick={()=>{ if(n.id==="new"){goNew();}else{setView(n.id);setSidebarOpen(false);} }}
                 style={{ display:"flex",alignItems:"center",gap:10,width:"100%",padding:"9px 12px",border:"none",background:active?T.blueLight:"transparent",color:active?T.blue:T.ink2,borderRadius:10,cursor:"pointer",fontSize:14,fontWeight:active?500:400,transition:"all .15s",marginBottom:2,outline:"none" }}
                 onMouseOver={e=>{if(!active)e.currentTarget.style.background="rgba(128,128,128,0.08)";}}
                 onMouseOut={e=>{if(!active)e.currentTarget.style.background="transparent";}}>
@@ -1104,10 +1124,15 @@ export default function App() {
       {/* Main content */}
       <main style={{ flex:1,overflowY:"auto",minHeight:"100vh",transition:"background .3s" }}>
         {/* Topbar */}
-        <div style={{ position:"sticky",top:0,zIndex:50,background:dark?"rgba(28,28,30,0.88)":"rgba(245,245,247,0.88)",backdropFilter:"blur(20px)",WebkitBackdropFilter:"blur(20px)",borderBottom:`1px solid ${T.border}`,padding:"14px 40px",display:"flex",justifyContent:"space-between",alignItems:"center",transition:"background .3s" }}>
-          <div>
-            <div style={{ fontSize:22,fontWeight:700,color:T.ink,letterSpacing:-0.7,lineHeight:1.1 }}>{TITLES[view]||pending?.title||"Meeting"}</div>
-            <div style={{ fontSize:13,color:T.ink3,marginTop:2 }}>{SUBS[view]||SUBS.result}</div>
+        <div style={{ position:"sticky",top:0,zIndex:50,background:dark?"rgba(28,28,30,0.88)":"rgba(245,245,247,0.88)",backdropFilter:"blur(20px)",WebkitBackdropFilter:"blur(20px)",borderBottom:`1px solid ${T.border}`,padding:"12px 20px",display:"flex",justifyContent:"space-between",alignItems:"center",transition:"background .3s" }}>
+          <div style={{ display:"flex",alignItems:"center",gap:12 }}>
+            <button className="mobile-show" onClick={()=>setSidebarOpen(true)} style={{ display:"none",width:36,height:36,borderRadius:9,background:T.surfaceHigh,border:"none",cursor:"pointer",alignItems:"center",justifyContent:"center",flexShrink:0 }}>
+              <svg width="18" height="18" viewBox="0 0 20 20" fill="none"><path d="M3 5h14M3 10h14M3 15h14" stroke={T.ink} strokeWidth="1.6" strokeLinecap="round"/></svg>
+            </button>
+            <div>
+              <div style={{ fontSize:22,fontWeight:700,color:T.ink,letterSpacing:-0.7,lineHeight:1.1 }}>{TITLES[view]||pending?.title||"Meeting"}</div>
+              <div style={{ fontSize:13,color:T.ink3,marginTop:2 }}>{SUBS[view]||SUBS.result}</div>
+            </div>
           </div>
           <div style={{ display:"flex",gap:8,alignItems:"center" }}>
             {view==="result"&&<button onClick={()=>setView("history")} style={{ display:"flex",alignItems:"center",gap:6,padding:"9px 16px",borderRadius:980,background:T.surfaceHigh,border:"none",color:T.ink,fontSize:13,fontWeight:500,cursor:"pointer" }}>← Back</button>}
@@ -1121,7 +1146,7 @@ export default function App() {
         </div>
 
         {/* Page body */}
-        <div style={{ padding:"32px 40px",maxWidth:920 }}>
+        <div style={{ padding:"24px 20px",maxWidth:920 }}>
           {!loaded
             ? <div style={{ display:"flex",justifyContent:"center",padding:80 }}><Spinner size={28} color={T.blue}/></div>
             : <>
